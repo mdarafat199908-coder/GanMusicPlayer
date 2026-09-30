@@ -11,13 +11,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Create Android project
-        run: |
-          mkdir -p app/src/main/java/com/gan/musicplayer
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          cat > settings.gradle <<'EOF'
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Create Android project
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/ganmusicplayer
+
+          cat > settings.gradle.kts <<'EOF'
           pluginManagement {
               repositories {
                   google()
@@ -38,27 +51,32 @@ jobs:
           include(":app")
           EOF
 
-          cat > build.gradle <<'EOF'
+          cat > build.gradle.kts <<'EOF'
           plugins {
-              id 'com.android.application' version '8.7.3' apply false
+              id("com.android.application") version "8.6.1" apply false
           }
           EOF
 
-          cat > app/build.gradle <<'EOF'
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
           plugins {
-              id 'com.android.application'
+              id("com.android.application")
           }
 
           android {
-              namespace 'com.gan.musicplayer'
-              compileSdk 35
+              namespace = "com.ganmusicplayer"
+              compileSdk = 35
 
               defaultConfig {
-                  applicationId 'com.gan.musicplayer'
-                  minSdk 23
-                  targetSdk 35
-                  versionCode 1
-                  versionName '1.0'
+                  applicationId = "com.ganmusicplayer"
+                  minSdk = 23
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0"
               }
           }
           EOF
@@ -66,13 +84,15 @@ jobs:
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-              <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+              <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-                  android:maxSdkVersion="32"/>
+                  android:maxSdkVersion="32" />
 
               <application
-                  android:theme="@style/AppTheme"
-                  android:label="Gan Music Player">
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:label="Gan Music Player"
+                  android:allowBackup="false"
+                  android:supportsRtl="true">
 
                   <activity
                       android:name=".MainActivity"
@@ -80,195 +100,91 @@ jobs:
                       android:exported="true">
 
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
 
                   </activity>
-              </application>
 
+              </application>
           </manifest>
           EOF
 
-          cat > app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:colorAccent">#2196F3</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:orientation="vertical"
-              android:padding="16dp">
-
-              <TextView
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="Gan Music Player"
-                  android:textSize="26sp"
-                  android:textStyle="bold"
-                  android:padding="10dp"/>
-
-              <ListView
-                  android:id="@+id/songList"
-                  android:layout_width="match_parent"
-                  android:layout_height="0dp"
-                  android:layout_weight="1"/>
-
-              <TextView
-                  android:id="@+id/nowPlaying"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="কোনো গান চলছে না"
-                  android:textSize="18sp"
-                  android:padding="12dp"/>
-
-          </LinearLayout>
-          EOF
-
-          cat > app/src/main/java/com/gan/musicplayer/MainActivity.java <<'EOF'
-          package com.gan.musicplayer;
+          cat > app/src/main/java/com/ganmusicplayer/MainActivity.java <<'EOF'
+          package com.ganmusicplayer;
 
           import android.Manifest;
           import android.app.Activity;
           import android.os.Bundle;
           import android.os.Build;
+          import android.content.pm.PackageManager;
           import android.provider.MediaStore;
           import android.database.Cursor;
-          import android.content.pm.PackageManager;
-          import android.media.MediaPlayer;
           import android.net.Uri;
+          import android.media.MediaPlayer;
+          import android.view.Gravity;
           import android.view.View;
-          import android.widget.ArrayAdapter;
-          import android.widget.ListView;
-          import android.widget.TextView;
-
+          import android.widget.*;
+          import android.graphics.Color;
           import java.util.ArrayList;
 
           public class MainActivity extends Activity {
 
-              ListView songList;
-              TextView nowPlaying;
-              ArrayList<String> names = new ArrayList<>();
-              ArrayList<String> paths = new ArrayList<>();
-              MediaPlayer player;
+              private ArrayList<String> songNames = new ArrayList<>();
+              private ArrayList<Uri> songUris = new ArrayList<>();
+
+              private MediaPlayer player;
+              private int currentSong = -1;
+
+              private TextView nowPlaying;
+              private Button playPause;
+              private ListView songList;
+
+              private static final int REQUEST_AUDIO = 100;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
-                  setContentView(R.layout.activity_main);
 
-                  songList = findViewById(R.id.songList);
-                  nowPlaying = findViewById(R.id.nowPlaying);
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(20, 20, 20, 10);
 
-                  if (Build.VERSION.SDK_INT >= 33) {
-                      requestPermissions(
-                          new String[]{Manifest.permission.READ_MEDIA_AUDIO}, 10);
-                  } else {
-                      requestPermissions(
-                          new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 10);
-                  }
+                  TextView title = new TextView(this);
+                  title.setText("Gan Music Player");
+                  title.setTextSize(26);
+                  title.setTextColor(Color.BLACK);
+                  title.setGravity(Gravity.CENTER);
+                  title.setPadding(5, 10, 5, 15);
 
-                  loadSongs();
+                  nowPlaying = new TextView(this);
+                  nowPlaying.setText("কোনো গান চলছে না");
+                  nowPlaying.setTextSize(16);
+                  nowPlaying.setGravity(Gravity.CENTER);
+                  nowPlaying.setPadding(5, 10, 5, 10);
 
-                  songList.setOnItemClickListener((parent, view, position, id) -> {
-                      playSong(position);
-                  });
-              }
+                  LinearLayout controls = new LinearLayout(this);
+                  controls.setGravity(Gravity.CENTER);
+                  controls.setOrientation(LinearLayout.HORIZONTAL);
 
-              void loadSongs() {
-                  String[] projection = {
-                      MediaStore.Audio.Media._ID,
-                      MediaStore.Audio.Media.DISPLAY_NAME
-                  };
+                  Button previous = new Button(this);
+                  previous.setText("⏮");
 
-                  Cursor cursor = getContentResolver().query(
-                      MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                      projection,
-                      MediaStore.Audio.Media.IS_MUSIC + " != 0",
-                      null,
-                      MediaStore.Audio.Media.DISPLAY_NAME + " ASC"
-                  );
+                  playPause = new Button(this);
+                  playPause.setText("▶");
 
-                  if (cursor != null) {
-                      int nameIndex = cursor.getColumnIndex(
-                          MediaStore.Audio.Media.DISPLAY_NAME);
+                  Button next = new Button(this);
+                  next.setText("⏭");
 
-                      int idIndex = cursor.getColumnIndex(
-                          MediaStore.Audio.Media._ID);
+                  controls.addView(previous);
+                  controls.addView(playPause);
+                  controls.addView(next);
 
-                      while (cursor.moveToNext()) {
-                          String name = cursor.getString(nameIndex);
-                          long id = cursor.getLong(idIndex);
+                  songList = new ListView(this);
 
-                          Uri uri = Uri.withAppendedPath(
-                              MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                              String.valueOf(id));
-
-                          names.add(name);
-                          paths.add(uri.toString());
-                      }
-
-                      cursor.close();
-                  }
-
-                  ArrayAdapter<String> adapter =
-                      new ArrayAdapter<>(
-                          this,
-                          android.R.layout.simple_list_item_1,
-                          names);
-
-                  songList.setAdapter(adapter);
-              }
-
-              void playSong(int position) {
-                  try {
-                      if (player != null) {
-                          player.release();
-                      }
-
-                      player = MediaPlayer.create(
-                          this,
-                          Uri.parse(paths.get(position)));
-
-                      player.start();
-
-                      nowPlaying.setText("▶ " + names.get(position));
-
-                      player.setOnCompletionListener(mp -> {
-                          nowPlaying.setText("গান শেষ হয়েছে");
-                      });
-
-                  } catch (Exception e) {
-                      nowPlaying.setText("গান চালানো যায়নি");
-                  }
-              }
-
-              @Override
-              protected void onDestroy() {
-                  if (player != null) {
-                      player.release();
-                  }
-                  super.onDestroy();
-              }
-          }
-          EOF
-
-          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
-          unzip -q gradle-8.9-bin.zip
-          export PATH="$PWD/gradle-8.9/bin:$PATH"
-
-          gradle wrapper --gradle-version 8.9
-          ./gradlew assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: GanMusicPlayer-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+                  root.addView(title);
+                  root.addView(nowPlaying);
+                  root.addView(controls);
+                  root.addView(songList,
+                          new LinearLayout.LayoutParams(
+                                  Linear
